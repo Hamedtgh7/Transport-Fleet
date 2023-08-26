@@ -30,5 +30,7 @@ class Vectornd:
 
 
 class Vector2d(Vectornd):
-    def __init__(self, *elements):
-        super().__init__(*elements)
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.x = x
+        self.y = y
