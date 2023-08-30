@@ -4,21 +4,26 @@ class Vectornd:
         self.elements = elements
 
     def __add__(self, second):
-        if len(self.elements) == len(second.elements):
-            return Vectornd([x+y for x, y in zip(self.elements, second.elements)])
-        else:
+        if len(self.elements) != len(second.elements):
             raise ValueError('not match')
+        return Vectornd([x+y for x, y in zip(self.elements, second.elements)])
 
     def __mul__(self, second):
+        if len(self.elements) != len(second.elements):
+            raise ValueError('not match')
         return Vectornd([x*y for x, y in zip(self.elements, second.elements)])
 
     def __len__(self):
         return len(self.elements)
 
     def __matmul__(self, second):
+        if len(self.elements) != len(second.elements):
+            raise ValueError('not match')
         return sum([x*y for x, y in zip(self.elements, second.elements)])
 
     def __sub__(self, second):
+        if len(self.elements) != len(second.elements):
+            raise ValueError('not match')
         return Vectornd([x-y for x, y in zip(self.elements, second.elements)])
 
     def __truediv__(self, second):
