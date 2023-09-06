@@ -31,11 +31,11 @@ class Calculator(threading.Thread):
             self.conn.send(str(result).encode('utf-8'))
             print(result)
 
+if __name__ =='__main__':
+    soc = socket.socket()
+    soc.bind(('127.0.0.1', 1234))
+    soc.listen()
 
-soc = socket.socket()
-soc.bind(('127.0.0.1', 1234))
-soc.listen()
-
-while True:
-    c_socket, c_address = soc.accept()
-    Calculator(c_socket).start()
+    while True:
+        c_socket, c_address = soc.accept()
+        Calculator(c_socket).start()
