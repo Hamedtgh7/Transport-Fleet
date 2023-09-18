@@ -26,13 +26,13 @@ def handle_client(conn, addr):
             elif command == 'Publish':
 
                 topic = params[0]
-                message = params[1]
+                message = params[1:]
+                conn.sendall(b'PubAck')
                 for client_addr, topics in clients.items():
                     if topic in topics:
 
                         send_message(client_addr, message, topic)
 
-                conn.sendall(b'PubAck')
             elif command == 'Ping':
                 pass
             else:
@@ -45,7 +45,7 @@ def handle_client(conn, addr):
 
 def send_message(client_addr, message, topic):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.connect((client_addr[0], PORT))
+        sock.connect((client_addr[0], client_addr[1]))
         data = f'Message {topic} {message}'.encode()
         sock.sendall(data)
 

@@ -24,7 +24,7 @@ def handle_server_response(sock):
         elif command == 'Message':
 
             topic = params[0]
-            message = ' '.join(params[1:])
+            message = params[1:]
             print(f'{topic}: {message}')
         else:
             print('Invalid command:', command)
