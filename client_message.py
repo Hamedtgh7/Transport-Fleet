@@ -24,31 +24,43 @@ def handle_server_response(sock):
         elif command == 'Message':
 
             topic = params[0]
-            message = params[1:]
+            message = params[1]
             print(f'{topic}: {message}')
         else:
             print('Invalid command:', command)
 
 
-def subscribe_topics(sock, topics):
-    for topic in topics:
-        send_message(sock, f'Subscribe {topic}')
+def subscribe_topics(sock: socket.socket, topics):
+    try:
+        sock.settimeout(10)
+        for topic in topics:
+            send_message(sock, f'Subscribe {topic}')
+            response = sock.recv(1024).decode().strip()
+            if response == 'SubAck':
+                print(f'Subscribing on {topic}')
+            else:
+                print('subscribing failed')
+                return False
+        return True
+    except socket.timeout:
+        print('subscribing failed')
+    finally:
+        sock.settimeout(None)
+
+
+def publish_message(sock: socket.socket, topic, message):
+    try:
+        sock.settimeout(10)
+        send_message(sock, f'Publish {topic} {message}')
         response = sock.recv(1024).decode().strip()
-        if response == 'SubAck':
-            print(f'Subscribing on {topic}')
+        if response == 'PubAck':
+            print('Your message published successfully')
         else:
-            print(f'Subscribing failed on {topic}')
-            return False
-    return True
-
-
-def publish_message(sock, topic, message):
-    send_message(sock, f'Publish {topic} {message}')
-    response = sock.recv(1024).decode().strip()
-    if response == 'PubAck':
-        print('Your message published successfully')
-    else:
+            print('Your message publishing failed')
+    except socket.timeout:
         print('Your message publishing failed')
+    finally:
+        sock.settimeout(None)
 
 
 operation = sys.argv[3]
@@ -59,7 +71,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
 
     if operation == 'publish':
         topic = sys.argv[4]
-        message = sys.argv[5]
+        message = sys.argv[5:]
         publish_message(sock, topic, message)
     elif operation == 'subscribe':
         topics = sys.argv[4:]
@@ -70,7 +82,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         thread.start()
 
         while True:
-            send_message(sock, 'Ping')
-            time.sleep(10)
+            # send_message(sock, 'Ping')
+            # time.sleep(10)
+            pass
     else:
         print('Invalid operation')

@@ -3,7 +3,7 @@ import threading
 
 HOST = '127.0.0.1'
 PORT = 1373
-clients = {}
+list_topics = {}
 
 
 def handle_client(conn, addr):
@@ -17,10 +17,10 @@ def handle_client(conn, addr):
             command, *params = data.decode().strip().split(' ')
             if command == 'Subscribe':
                 topic = params[0]
-                if addr in clients:
-                    clients[addr].append(topic)
+                if topic in list_topics:
+                    list_topics[topic].append(conn)
                 else:
-                    clients[addr] = [topic]
+                    list_topics[topic] = [conn]
 
                 conn.sendall(b'SubAck')
             elif command == 'Publish':
@@ -28,26 +28,22 @@ def handle_client(conn, addr):
                 topic = params[0]
                 message = params[1:]
                 conn.sendall(b'PubAck')
-                for client_addr, topics in clients.items():
-                    if topic in topics:
-
-                        send_message(client_addr, message, topic)
+                for title, connections in list_topics.items():
+                    if topic == title:
+                        for connection in connections:
+                            send_message(connection, message, topic)
 
             elif command == 'Ping':
                 pass
             else:
                 print('Invalid command:', command)
 
-    if addr in clients:
-        del clients[addr]
     print('Disconnected by', addr)
 
 
-def send_message(client_addr, message, topic):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.connect((client_addr[0], client_addr[1]))
-        data = f'Message {topic} {message}'.encode()
-        sock.sendall(data)
+def send_message(connection, message, topic):
+    data = f'Message {topic} {message}'.encode()
+    connection.sendall(data)
 
 
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
