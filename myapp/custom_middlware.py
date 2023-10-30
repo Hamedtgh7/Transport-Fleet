@@ -11,22 +11,20 @@ class CustomMiddleware:
     def __call__(self, request):
 
         token = request.META.get('HTTP_Authorization')
-        if token:
-            try:
-                decoded_token = jwt.decode(
-                    jwt=token,
-                    algorithms=['HS256'],
-                    key=settings.JWT_KEY
-                )
-                username = decoded_token.get('username')
-                if username:
-                    request.allow = username
-                else:
-                    request.allow = None
-            except jwt.DecodeError:
-                return Response('Invalid token', status=status.HTTP_401_UNAUTHORIZED)
-        else:
-            Response('Invalid header', status=status.HTTP_401_UNAUTHORIZED)
+        if not token:
+            return self.get_response(request)
+        try:
+            decoded_token = jwt.decode(
+                jwt=token,
+                algorithms=['HS256'],
+                key=settings.JWT_KEY
+            )
+            username = decoded_token.get('username')
+            if username:
+                request.allow = username
+            else:
+                request.allow = None
+        except jwt.DecodeError:
+            return Response('Invalid token', status=status.HTTP_401_UNAUTHORIZED)
 
-        response = self.get_response(request)
-        return response
+        return self.get_response(request)

@@ -9,6 +9,11 @@ djangorestframework = "*"
 pyjwt = "*"
 drf-yasg = "*"
 mysqlclient = "*"
+python-dotenv = "*"
+redis = "*"
+asgiref = "*"
+celery = "*"
+eventlet = "*"
 
 [dev-packages]
 

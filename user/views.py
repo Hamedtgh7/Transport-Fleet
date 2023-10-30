@@ -1,12 +1,14 @@
 from django.conf import settings
-from django.db import transaction
-from asgiref.sync import sync_to_async
+from django.shortcuts import get_object_or_404
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
-from rest_framework.decorators import action
+from rest_framework.viewsets import GenericViewSet
+from rest_framework.mixins import CreateModelMixin, UpdateModelMixin, DestroyModelMixin
+from rest_framework.views import APIView
 from rest_framework import status
-from .serializers import LoginUserSerializer, Register1UserSerializer, Register2UserSerializer, Register3UserSerializer
-from .models import User, Company
+from .serializers import LoginUserSerializer, RegisterUserSerializer, RegisterPhoneSerializer, CompanyCarSerializer, LocationSerializer, StandardSerializer
+from .models import User, Company, Location, Car, Standard
+from .tasks import create_cars
+import redis
 import jwt
 import random
 
@@ -25,86 +27,102 @@ def generate_otp():
     return random.randint(100000, 999999)
 
 
-class UserViewSet(ModelViewSet):
+class LoginView(APIView):
+    def post(self, request):
+        serializer = LoginUserSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        username = serializer.validated_data['username']
+
+        payload = {
+            'username': username
+        }
+        token = jwt.encode(
+            payload=payload, key=settings.JWT_KEY, algorithm='HS256')
+        return Response(token)
+
+
+class RegisterUserView(CreateModelMixin, GenericViewSet):
     queryset = User.objects.all()
+    serializer_class = RegisterUserSerializer
 
-    def get_serializer_class(self):
-        if self.action == 'register1':
-            return Register1UserSerializer
-        elif self.action == 'register2':
-            return Register2UserSerializer
-        elif self.action == 'register3':
-            return Register3UserSerializer
-        elif self.action == 'login':
-            return LoginUserSerializer
 
-    @action(detail=False, methods=['POST'])
-    def login(self, request):
-        username = request.data.get('username')
-        password = request.data.get('password')
+class RegisterPhoneView(UpdateModelMixin, GenericViewSet):
+    queryset = User.objects.all()
+    serializer_class = RegisterPhoneSerializer
 
-        try:
-            user = User.objects.get(username=username)
-            if user.password == password:
-                payload = {
-                    'username': username
-                }
-                token = jwt.encode(
-                    payload=payload, key=settings.JWT_KEY, algorithm='HS256')
-                return Response(token)
-            else:
-                return Response('Invalid password', status=status.HTTP_401_UNAUTHORIZED)
-        except User.DoesNotExist:
-            return Response('User not found', status=status.HTTP_404_NOT_FOUND)
-
-    @action(detail=False, methods=['POST'])
-    def register1(self, request):
-        serializer = Register1UserSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        request.session['username'] = serializer.validated_data['username']
-        request.session['password'] = serializer.validated_data['password']
-
-        redirect_url = '/user/register2/'
-        return Response(status=status.HTTP_302_FOUND, headers={'Location': redirect_url})
-
-    @action(detail=False, methods=['POST'])
-    def register2(self, request):
-        serializer = Register2UserSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        phone = serializer.validated_data['phone']
+    def update(self, request, *args, **kwargs):
         otp = str(generate_otp())
+        username = request.data.get('username')
+        phone = request.data.get('phone')
 
-        request.session['opt'] = otp
-        request.session['phone'] = phone
+        with redis.Redis(host='localhost', port=6379) as redis_cache:
+            cache_key = f'otp_{username}'
+            redis_cache.setex(cache_key, time=120, value=otp)
 
-        redirect_url = '/user/register3'
-        return Response(status=status.HTTP_302_FOUND, headers={'Location': redirect_url})
+        user = get_object_or_404(User, username=username)
+        user.phone = phone
+        user.save()
 
-    @action(detail=False, methods=['POST'])
-    async def register3(self, request):
-        user_otp = request.data.get('opt')
-        real_otp = request.session.get('otp')
+        return Response(otp)
 
-        if user_otp == real_otp:
-            serailizer = Register3UserSerializer(data=request.data)
-            serailizer.is_valid(raise_exception=True)
-            username = request.session.get('username')
-            password = request.session.get('password')
-            phone = request.session.get('phone')
-            name = serailizer.validated_data['name']
-            number_cars = serailizer.validated_data['number_cars']
 
-            with transaction.atomic():
-                user = await sync_to_async(User.objects.create)(username=username, password=password, phone=phone)
-                company = await sync_to_async(Company.objects.create)(name=name, number_cars=number_cars, user=user)
+class CompanyCarView(CreateModelMixin, GenericViewSet):
+    queryset = Company.objects.all()
+    serializer_class = CompanyCarSerializer
 
-            del request.session['username']
-            del request.session['password']
-            del request.session['otp']
-            del request.session['phone']
+    def create(self, request, *args, **kwargs):
+        serializer = CompanyCarSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-            return Response('User and company Created', status=status.HTTP_201_CREATED)
-        else:
-            return Response('Invalid OTP', status=status.HTTP_403_FORBIDDEN)
+        name = serializer.validated_data['name']
+        car_numbers = serializer.validated_data['car_numbers']
+        user = get_object_or_404(
+            User, username=serializer.validated_data['username'])
+
+        company = Company.objects.create(name=name, user=user)
+
+        create_cars.delay(company.id, car_numbers)
+
+        return Response(status=status.HTTP_201_CREATED)
+
+
+class StandardView(CreateModelMixin, GenericViewSet, DestroyModelMixin, UpdateModelMixin):
+    queryset = Standard.objects.all()
+    serializer_class = StandardSerializer
+
+    def perform_create(self, serializer):
+        standard_instance = serializer.save()
+        with redis.Redis('localhost', port=6379)as redis_cache:
+            cache_key = f'standard_{standard_instance.name}'
+            redis_cache.setex(cache_key, value=serializer.data)
+
+    def perform_update(self, serializer):
+        standard_instance = serializer.save()
+        with redis.Redis('localhost', port=6379)as redis_cache:
+            cache_key = f'standard_{standard_instance.name}'
+            redis_cache.setex(cache_key, value=serializer.data)
+
+    def perform_destroy(self, instance):
+        with redis.Redis('localhost', port=6379)as redis_cache:
+            redis_cache.delete(f'standard_{instance.name}')
+        return super().perform_destroy(instance)
+
+
+class LocationView(CreateModelMixin, GenericViewSet):
+    queryset = Location.objects.all()
+    serializer_class = LocationSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = LocationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        car_id = serializer.validated_data['car_id']
+        latitude = serializer.validated_data['latitude']
+        longitude = serializer.validated_data['longitude']
+        acceleration = serializer.validated_data['acceleration']
+        speed = serializer.validated_data['speed']
+
+        car = get_object_or_404(Car, id=car_id)
+        Location.objects.create(latitude=latitude, longitude=longitude,
+                                acceleration=acceleration, speed=speed, car=car)
+        return Response(status=status.HTTP_201_CREATED)
