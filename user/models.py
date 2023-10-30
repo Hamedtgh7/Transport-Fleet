@@ -24,11 +24,18 @@ class Car(models.Model):
     company = models.ForeignKey(Company, on_delete=models.SET_NULL, null=True)
 
 
+class WrongeCars(models.Model):
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, related_name='out_of_range')
+    script = models.CharField(max_length=255)
+
+
 class Location(models.Model):
     latitude = models.FloatField()
     longitude = models.FloatField()
     speed = models.FloatField(validators=[MinValueValidator(0)])
     acceleration = models.FloatField()
+    created_at = models.DateTimeField(auto_now_add=True)
     car = models.ForeignKey(
         Car, on_delete=models.CASCADE, related_name='location')
 

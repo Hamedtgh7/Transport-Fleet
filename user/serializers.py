@@ -1,7 +1,7 @@
 from django.shortcuts import get_object_or_404
+from django.core.validators import MinValueValidator
 from rest_framework import serializers
-from .models import User, Company, Location, Standard
-import redis
+from .models import User, Company, Location, Standard, WrongeCars
 import re
 
 
@@ -63,22 +63,8 @@ class CompanyCarSerializer(serializers.ModelSerializer):
     name = serializers.CharField(max_length=255)
 
     def validate(self, data):
-        username = data.get('username')
         name = data.get('name')
-        otp = data.get('otp')
         car_numbers = data.get('car_numbers')
-
-        database_user = get_object_or_404(User, username=username)
-        cache_key = f'otp_{database_user.username}'
-
-        with redis.Redis(host='localhost', port=6379) as redis_cache:
-            stored_otp = redis_cache.get(cache_key).decode('utf-8')
-
-        if not stored_otp:
-            raise serializers.ValidationError('Otp expired')
-
-        if otp != stored_otp:
-            raise serializers.ValidationError('Invalid otp')
 
         if not re.match('[آ-ی]+$', name.replace(' ', '')):
             raise serializers.ValidationError('Name is not valid.')
@@ -94,11 +80,19 @@ class CompanyCarSerializer(serializers.ModelSerializer):
         fields = ['username', 'otp', 'name', 'car_numbers']
 
 
+class WrongCarSerialiezer(serializers.ModelSerializer):
+    script = serializers.CharField(max_length=255, read_only=True)
+
+    class Meta:
+        model = WrongeCars
+        fields = ['script']
+
+
 class StandardSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         min_speed = data.get('min_speed')
-        max_speed = data.get('max_spped')
+        max_speed = data.get('max_speed')
         if max_speed <= min_speed:
             raise serializers.ValidationError(
                 'Maximum speed should be more than minimum speed.')
@@ -130,6 +124,7 @@ class StandardSerializer(serializers.ModelSerializer):
 
 
 class LocationSerializer(serializers.ModelSerializer):
+    car_id = serializers.IntegerField(validators=[MinValueValidator(1)])
 
     class Meta:
         model = Location
