@@ -1,13 +1,15 @@
 from django.conf import settings
 from django.shortcuts import get_object_or_404
+from django.core.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
-from rest_framework.mixins import CreateModelMixin, UpdateModelMixin, DestroyModelMixin
+from rest_framework.mixins import CreateModelMixin, UpdateModelMixin, DestroyModelMixin, RetrieveModelMixin
 from rest_framework.views import APIView
 from rest_framework import status
-from .serializers import LoginUserSerializer, RegisterUserSerializer, RegisterPhoneSerializer, CompanyCarSerializer, LocationSerializer, StandardSerializer
-from .models import User, Company, Location, Car, Standard
-from .tasks import create_cars
+from .serializers import LoginUserSerializer, RegisterUserSerializer, RegisterPhoneSerializer, CompanyCarSerializer, LocationSerializer, StandardSerializer, WrongCarSerialiezer
+from .models import User, Company, Location, Car, Standard, WrongeCars
+from .tasks import create_cars, wrong_cars
+import json
 import redis
 import jwt
 import random
@@ -66,18 +68,40 @@ class RegisterPhoneView(UpdateModelMixin, GenericViewSet):
         return Response(otp)
 
 
-class CompanyCarView(CreateModelMixin, GenericViewSet):
-    queryset = Company.objects.all()
-    serializer_class = CompanyCarSerializer
+class CompanyCarView(CreateModelMixin, GenericViewSet, RetrieveModelMixin):
+    def get_queryset(self):
+        if self.action == 'create':
+            return Company.objects.all()
+        elif self.action == 'retrieve':
+            return WrongeCars.objects.filter(company_id=self.kwargs['pk'])
+        return super().get_queryset()
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return CompanyCarSerializer
+        elif self.action == 'retrieve':
+            return WrongCarSerialiezer
 
     def create(self, request, *args, **kwargs):
         serializer = CompanyCarSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        username = serializer.validated_data['username']
+        otp = serializer.validated_data['otp']
+
+        user = get_object_or_404(User, username=username)
+        cache_key = f'otp_{user.username}'
+        with redis.Redis(host='localhost', port=6379) as redis_cache:
+            stored_otp = redis_cache.get(cache_key).decode('utf-8')
+
+        if not stored_otp:
+            raise ValidationError('Otp expired')
+
+        if otp != stored_otp:
+            raise ValidationError('Invalid otp')
+
         name = serializer.validated_data['name']
         car_numbers = serializer.validated_data['car_numbers']
-        user = get_object_or_404(
-            User, username=serializer.validated_data['username'])
 
         company = Company.objects.create(name=name, user=user)
 
@@ -93,18 +117,21 @@ class StandardView(CreateModelMixin, GenericViewSet, DestroyModelMixin, UpdateMo
     def perform_create(self, serializer):
         standard_instance = serializer.save()
         with redis.Redis('localhost', port=6379)as redis_cache:
-            cache_key = f'standard_{standard_instance.name}'
-            redis_cache.setex(cache_key, value=serializer.data)
+            cache_key = f'standard_{standard_instance.company.id}'
+            json_serializer = json.dumps(serializer.data)
+            redis_cache.set(cache_key, value=json_serializer)
 
     def perform_update(self, serializer):
         standard_instance = serializer.save()
         with redis.Redis('localhost', port=6379)as redis_cache:
-            cache_key = f'standard_{standard_instance.name}'
-            redis_cache.setex(cache_key, value=serializer.data)
+            cache_key = f'standard_{standard_instance.company.id}'
+            print(cache_key)
+            json_serializer = json.dumps(serializer.data)
+            redis_cache.set(cache_key, value=json_serializer)
 
     def perform_destroy(self, instance):
         with redis.Redis('localhost', port=6379)as redis_cache:
-            redis_cache.delete(f'standard_{instance.name}')
+            redis_cache.delete(f'standard_{instance.company.id}')
         return super().perform_destroy(instance)
 
 
@@ -121,8 +148,22 @@ class LocationView(CreateModelMixin, GenericViewSet):
         longitude = serializer.validated_data['longitude']
         acceleration = serializer.validated_data['acceleration']
         speed = serializer.validated_data['speed']
-
         car = get_object_or_404(Car, id=car_id)
-        Location.objects.create(latitude=latitude, longitude=longitude,
-                                acceleration=acceleration, speed=speed, car=car)
+
+        location = Location.objects.create(latitude=latitude, longitude=longitude,
+                                           acceleration=acceleration, speed=speed, car=car)
+
+        location_data = {
+            'id': location.pk,
+            'latitude': location.latitude,
+            'longitude': location.longitude,
+            'acceleration': location.acceleration,
+            'speed': location.speed,
+            'created_time': location.created_at.isoformat(),
+            'car_id': car_id,
+        }
+
+        wrong_cars.delay(latitude, longitude, speed,
+                         acceleration, car_id, car.company.id, location_data)
+
         return Response(status=status.HTTP_201_CREATED)
