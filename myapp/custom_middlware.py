@@ -9,8 +9,7 @@ class CustomMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-
-        token = request.META.get('HTTP_Authorization')
+        token = request.META.get('HTTP_AUTHORIZATION')
         if not token:
             return self.get_response(request)
         try:

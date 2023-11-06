@@ -1,7 +1,7 @@
 from django.shortcuts import get_object_or_404
 from django.core.validators import MinValueValidator
 from rest_framework import serializers
-from .models import User, Company, Location, Standard, WrongeCars
+from .models import User, Company, Location, Standard, Messages, Report
 import re
 
 
@@ -12,7 +12,7 @@ class LoginUserSerializer(serializers.Serializer):
     def validate(self, data):
         username = data.get('username')
         password = data.get('password')
-        user, created = get_object_or_404(User, username=username)
+        user = get_object_or_404(User, username=username)
 
         if user.password != password:
             return serializers.ValidationError('Invalid password')
@@ -80,11 +80,11 @@ class CompanyCarSerializer(serializers.ModelSerializer):
         fields = ['username', 'otp', 'name', 'car_numbers']
 
 
-class WrongCarSerialiezer(serializers.ModelSerializer):
+class MessagesSerialiezer(serializers.ModelSerializer):
     script = serializers.CharField(max_length=255, read_only=True)
 
     class Meta:
-        model = WrongeCars
+        model = Messages
         fields = ['script']
 
 
@@ -117,10 +117,24 @@ class StandardSerializer(serializers.ModelSerializer):
 
         return data
 
+    def save(self, **kwargs):
+        company = self.context['company_id']
+        existing_standard = Standard.objects.filter(company=company).first()
+
+        if existing_standard:
+            for attr, value in self.validated_data.items():
+                setattr(existing_standard, attr, value)
+            existing_standard.save()
+            return existing_standard
+        else:
+            self.instance = Standard.objects.create(
+                company=company, **self.validated_data)
+            return self.instance
+
     class Meta:
         model = Standard
         fields = ['min_speed', 'max_speed', 'min_latitude', 'max_latitude', 'min_longitude',
-                  'max_longitude', 'min_acceleration', 'max_acceleration', 'company']
+                  'max_longitude', 'min_acceleration', 'max_acceleration']
 
 
 class LocationSerializer(serializers.ModelSerializer):
@@ -129,3 +143,9 @@ class LocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Location
         fields = ['latitude', 'longitude', 'speed', 'car_id', 'acceleration']
+
+
+class ReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Report
+        fields = ['right_distance', 'car']

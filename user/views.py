@@ -1,13 +1,16 @@
 from django.conf import settings
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.core.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
-from rest_framework.mixins import CreateModelMixin, UpdateModelMixin, DestroyModelMixin, RetrieveModelMixin
+from rest_framework.mixins import CreateModelMixin, UpdateModelMixin, DestroyModelMixin, RetrieveModelMixin, ListModelMixin
 from rest_framework.views import APIView
 from rest_framework import status
-from .serializers import LoginUserSerializer, RegisterUserSerializer, RegisterPhoneSerializer, CompanyCarSerializer, LocationSerializer, StandardSerializer, WrongCarSerialiezer
-from .models import User, Company, Location, Car, Standard, WrongeCars
+from datetime import timedelta
+from .serializers import LoginUserSerializer, RegisterUserSerializer, RegisterPhoneSerializer, CompanyCarSerializer, LocationSerializer, StandardSerializer, MessagesSerialiezer, ReportSerializer
+from .models import User, Company, Location, Car, Standard, Messages, Report
+from .permissions import Permissions
 from .tasks import create_cars, wrong_cars
 import json
 import redis
@@ -69,18 +72,8 @@ class RegisterPhoneView(UpdateModelMixin, GenericViewSet):
 
 
 class CompanyCarView(CreateModelMixin, GenericViewSet, RetrieveModelMixin):
-    def get_queryset(self):
-        if self.action == 'create':
-            return Company.objects.all()
-        elif self.action == 'retrieve':
-            return WrongeCars.objects.filter(company_id=self.kwargs['pk'])
-        return super().get_queryset()
-
-    def get_serializer_class(self):
-        if self.action == 'create':
-            return CompanyCarSerializer
-        elif self.action == 'retrieve':
-            return WrongCarSerialiezer
+    queryset = Company.objects.all()
+    serializer_class = CompanyCarSerializer
 
     def create(self, request, *args, **kwargs):
         serializer = CompanyCarSerializer(data=request.data)
@@ -107,31 +100,54 @@ class CompanyCarView(CreateModelMixin, GenericViewSet, RetrieveModelMixin):
 
         create_cars.delay(company.id, car_numbers)
 
-        return Response(status=status.HTTP_201_CREATED)
+        return Response({'message': 'Company and Cars created'}, status=status.HTTP_201_CREATED)
+
+
+class MessagesView(ListModelMixin, GenericViewSet):
+    serializer_class = MessagesSerialiezer
+
+    def get_queryset(self):
+        username = self.request.allow
+        return Messages.objects.filter(company=username.company)
 
 
 class StandardView(CreateModelMixin, GenericViewSet, DestroyModelMixin, UpdateModelMixin):
     queryset = Standard.objects.all()
     serializer_class = StandardSerializer
+    permission_classes = [Permissions]
+
+    def get_serializer_context(self):
+        username = self.request.allow
+        company = User.objects.get(username=username).company
+        return {'company_id': company}
+
+    def get_object(self):
+        username = self.request.allow
+        return User.objects.get(username=username).company.standard
 
     def perform_create(self, serializer):
-        standard_instance = serializer.save()
+        serializer.save()
+        username = self.request.allow
+        company_id = User.objects.get(username=username).company.pk
         with redis.Redis('localhost', port=6379)as redis_cache:
-            cache_key = f'standard_{standard_instance.company.id}'
+            cache_key = f'standard_{company_id}'
             json_serializer = json.dumps(serializer.data)
             redis_cache.set(cache_key, value=json_serializer)
 
     def perform_update(self, serializer):
-        standard_instance = serializer.save()
+        serializer.save()
+        username = self.request.allow
+        company_id = User.objects.get(username=username).company.pk
         with redis.Redis('localhost', port=6379)as redis_cache:
-            cache_key = f'standard_{standard_instance.company.id}'
-            print(cache_key)
+            cache_key = f'standard_{company_id}'
             json_serializer = json.dumps(serializer.data)
             redis_cache.set(cache_key, value=json_serializer)
 
     def perform_destroy(self, instance):
+        username = self.request.allow
+        company_id = User.objects.get(username=username).company.pk
         with redis.Redis('localhost', port=6379)as redis_cache:
-            redis_cache.delete(f'standard_{instance.company.id}')
+            redis_cache.delete(f'standard_{company_id}')
         return super().perform_destroy(instance)
 
 
@@ -149,21 +165,29 @@ class LocationView(CreateModelMixin, GenericViewSet):
         acceleration = serializer.validated_data['acceleration']
         speed = serializer.validated_data['speed']
         car = get_object_or_404(Car, id=car_id)
-
-        location = Location.objects.create(latitude=latitude, longitude=longitude,
-                                           acceleration=acceleration, speed=speed, car=car)
-
-        location_data = {
-            'id': location.pk,
-            'latitude': location.latitude,
-            'longitude': location.longitude,
-            'acceleration': location.acceleration,
-            'speed': location.speed,
-            'created_time': location.created_at.isoformat(),
-            'car_id': car_id,
-        }
-
         wrong_cars.delay(latitude, longitude, speed,
-                         acceleration, car_id, car.company.id, location_data)
+                         acceleration, car_id, car.company.id)
 
-        return Response(status=status.HTTP_201_CREATED)
+        return Response({'message': 'Location created.'}, status=status.HTTP_201_CREATED)
+
+
+class ReportView(ListModelMixin, GenericViewSet):
+    serializer_class = ReportSerializer
+
+    def get_daily_reports(self):
+        username = self.request.allow
+        company = User.objects.get(username=username).company
+        start_time = timezone.now()-timedelta(days=1)
+        return Report.objects.filter(company=company, created_at__range=[start_time, timezone.now()])
+
+    def get_weekly_reports(self):
+        username = self.request.allow
+        company = User.objects.get(username=username).company
+        start_time = timezone.now()-timedelta(weeks=1)
+        return Report.objects.filter(company=company, created_at__range=[start_time, timezone.now()])
+
+    def get_monthly_reports(self):
+        username = self.request.allow
+        company = User.objects.get(username=username).company
+        start_time = timezone.now()-timedelta(days=30)
+        return Report.objects.filter(company=company, created_at__range=[start_time, timezone.now()])

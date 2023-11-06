@@ -24,7 +24,7 @@ class Car(models.Model):
     company = models.ForeignKey(Company, on_delete=models.SET_NULL, null=True)
 
 
-class WrongeCars(models.Model):
+class Messages(models.Model):
     company = models.ForeignKey(
         Company, on_delete=models.CASCADE, related_name='out_of_range')
     script = models.CharField(max_length=255)
@@ -50,4 +50,13 @@ class Standard(models.Model):
     min_acceleration = models.FloatField()
     max_acceleration = models.FloatField()
     company = models.OneToOneField(
-        Company, on_delete=models.CASCADE, related_name='location')
+        Company, on_delete=models.CASCADE, related_name='standard')
+
+
+class Report(models.Model):
+    right_distance = models.FloatField()
+    car = models.ForeignKey(
+        Car, on_delete=models.CASCADE, related_name='reports')
+    company = models.ForeignKey(
+        Company, on_delete=models.CASCADE, related_name='reports')
+    created_at = models.DateTimeField(auto_now_add=True)
