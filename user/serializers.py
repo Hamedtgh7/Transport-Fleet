@@ -148,4 +148,5 @@ class LocationSerializer(serializers.ModelSerializer):
 class ReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = Report
-        fields = ['right_distance', 'car']
+        fields = ['car', 'right_speed_distance', 'right_acceleration_distance', 'wrong_location_distance',
+                  'right_speed_time', 'right_acceleration_time', 'wrong_location_time', 'total_distance', 'period_times']

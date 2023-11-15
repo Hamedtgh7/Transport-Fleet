@@ -54,7 +54,14 @@ class Standard(models.Model):
 
 
 class Report(models.Model):
-    right_distance = models.FloatField()
+    right_speed_distance = models.FloatField()
+    right_acceleration_distance = models.FloatField()
+    wrong_location_distance = models.FloatField()
+    right_speed_time = models.TimeField()
+    right_acceleration_time = models.TimeField()
+    wrong_location_time = models.TimeField()
+    total_distance = models.FloatField()
+    period_times = models.TextField()
     car = models.ForeignKey(
         Car, on_delete=models.CASCADE, related_name='reports')
     company = models.ForeignKey(
