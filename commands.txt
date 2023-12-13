@@ -1,8 +1,0 @@
-## section 1
-awk "/16:17/" log > 16.txt
-
-## section 2
-grep -v "INFO" 16.txt > no_info.txt
-
-## section 3
-awk -F, '$2=="WARN" { warnings[$3]++ } END { for (class in warnings) print class , warnings[class] } no_info.txt > class_warnings.txt
