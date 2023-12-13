@@ -1,9 +1,0 @@
-1) docker pull ubuntu:20.04
-2) docker run -it ubuntu:20.04 /bin/sh
-3) git clone https://github.com/arastu/docker-training
-docker build -t docker-test
-4) docker login
-docker tag docker-test hamedtgh77/test
-docker push hamedtgh77/test
-
-link:https://hub.docker.com/repository/docker/hamedtgh77/test
