@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.db.models import Sum
+from django.db.models.functions import ConcatPair
 from django.core.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
@@ -61,8 +63,13 @@ class RegisterPhoneView(UpdateModelMixin, GenericViewSet):
         phone = request.data.get('phone')
 
         with redis.Redis(host='localhost', port=6379) as redis_cache:
+            otp_time = redis_cache.get(f'otp_time_{username}')
+            if otp_time and (timezone.now()-timezone.make_aware(otp_time)).seconds < 300:
+                raise ValidationError('wait for 5 minutes')
+
             cache_key = f'otp_{username}'
             redis_cache.setex(cache_key, time=120, value=otp)
+            redis_cache.set(f'otp_time_{username}', value=timezone.now())
 
         user = get_object_or_404(User, username=username)
         user.phone = phone
@@ -174,20 +181,47 @@ class LocationView(CreateModelMixin, GenericViewSet):
 class ReportView(ListModelMixin, GenericViewSet):
     serializer_class = ReportSerializer
 
-    def get_daily_reports(self):
-        username = self.request.allow
+    def get_daily_reports(self, request):
+        username = request.allow
         company = User.objects.get(username=username).company
         start_time = timezone.now()-timedelta(days=1)
-        return Report.objects.filter(company=company, created_at__range=[start_time, timezone.now()])
+        reports = Report.objects.filter(company=company, created_at__range=[
+                                        start_time, timezone.now()])
+        serailizer_data = self.serializer_class(reports, many=True).data
+        return Response(serailizer_data, status=status.HTTP_200_OK)
 
-    def get_weekly_reports(self):
-        username = self.request.allow
+    def get_weekly_reports(self, request):
+        username = request.allow
         company = User.objects.get(username=username).company
         start_time = timezone.now()-timedelta(weeks=1)
-        return Report.objects.filter(company=company, created_at__range=[start_time, timezone.now()])
+        daily_reports = Report.objects.filter(company=company, created_at__range=[
+            start_time, timezone.now()])
+        weekly_report = daily_reports.values('car').annotate(
+            right_speed_distance=Sum('right_speed_distance'),
+            right_acceleration_distance=Sum('right_acceleration_distance'),
+            wrong_location_distance=Sum('wrong_location_distance'),
+            right_speed_time=Sum('right_speed_time'),
+            right_acceleration_time=Sum('right_acceleration_time'),
+            wrong_location_time=Sum('wrong_location_time'),
+            total_distance=Sum('total_distance'),
+            period_times=ConcatPair('period_times')
+        )
+        return Response(weekly_report, status=status.HTTP_200_OK)
 
-    def get_monthly_reports(self):
-        username = self.request.allow
+    def get_monthly_reports(self, request):
+        username = request.allow
         company = User.objects.get(username=username).company
         start_time = timezone.now()-timedelta(days=30)
-        return Report.objects.filter(company=company, created_at__range=[start_time, timezone.now()])
+        daily_reports = Report.objects.filter(company=company, created_at__range=[
+            start_time, timezone.now()])
+        monthly_report = daily_reports.values('car').annotate(
+            right_speed_distance=Sum('right_speed_distance'),
+            right_acceleration_distance=Sum('right_acceleration_distance'),
+            wrong_location_distance=Sum('wrong_location_distance'),
+            right_speed_time=Sum('right_speed_time'),
+            right_acceleration_time=Sum('right_acceleration_time'),
+            wrong_location_time=Sum('wrong_location_time'),
+            total_distance=Sum('total_distance'),
+            period_times=ConcatPair('period_times')
+        )
+        return Response(monthly_report, status=status.HTTP_200_OK)
